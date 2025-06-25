@@ -1,45 +1,48 @@
 # Project start
 library(BDgraph)
 library(qgraph)
-library(igraph)
+library(pROC)
 
 ################################################################################
 # BD-A (Mohammadi et al., 2023)
 ################################################################################
 
-get_deg <- function(x, empirical = TRUE) {
+## Calculate node strenght
 
-  if (empirical == TRUE) {
-    K = x$K
-    G = x$G
-  } else {
-    K = x$K_hat
-    G = x$last_graph
-  }
-  p = ncol(K)
+get_strength <- function(graph_matrix, precision_matrix) {
+  # Convert precision matrix to partial correlation matrix
+  p_cors <- -cov2cor(precision_matrix)
+  diag(p_cors) <- 0
 
-  partial_cor = -K / (outer(diag(K), diag(K)))
-  diag(partial_cor) = 0
+  # Apply the graph structure (set non-edges to zero)
+  weighted_adj_matrix <- p_cors * graph_matrix
 
-  w = partial_cor * G
+  # Calculate strength for each node
+  node_strengths <- colSums(abs(weighted_adj_matrix))
 
-  strenght_list = colSums(abs(w))
-
-  return(strenght_list)
+  return(node_strengths)
 }
+
+# --- 1. SIMULATION SETUP ---
 
 p <- 20
 
 conditions_grid <- expand.grid(
   p = p,
   n = 2*p,
-  sparsity = 0.5,
+  prob = 0.5,
   g_prior = 0.5, # sparsity prior
   eff_size = 0.3,
-  dist = "scale-free",
+  graph_type = "scale-free",
   b_true = 3,
   b_prior = 3 # GWishart degrees of freedom prior
   )
+
+reps <- 1
+
+results_df <- data.frame()
+
+# --- 2. MAIN SIMULATION LOOP ---
 
 for (i in 1:nrow(conditions_grid)) {
 
@@ -47,18 +50,22 @@ for (i in 1:nrow(conditions_grid)) {
   print(params)
 
   for (rep in 1:reps) {
-    cat(".")
+
+    cat(paste("Running repetition", i, "of", reps, "\n"))
+
     data  <-  bdgraph.sim(
       p = params$p,
-      graph = params$dist,
+      graph = params$graph_type,
       n = params$n,
       type = "Gaussian",
-      prob = params$sparsity,
-      mean = 0,
+      prob = params$prob,
+      mean = params$eff_size,
       b = params$b_true
     )
 
-    G_true <- sim_output$G
+    G_true <- data$G
+    K_true <- data$K
+
     response <- G_true[upper.tri(G_true)]
     strength_true <- get_deg(data)
 
@@ -70,20 +77,70 @@ for (i in 1:nrow(conditions_grid)) {
     rep = data$rep
     algorithm_name = "BDA"
 
-    # run the algorithm
+    # --- 2.2. Run the BDMCMC Algorithm ---
     sample_bd <- bdgraph(
       data = data$data,
       algorithm = "bdmcmc",
+      iter = 5000,
       g.prior = params$g_prior,
-      df.prior = params$b_prior
-      )
+      df.prior = params$b_prior,
+      save = TRUE
+    )
+    summary_bd <- summary(sample_bd)
 
-    strength_estimated  <- get_deg(sample_bd, FALSE)
+    # Extract estimated G and K
+    pip_edge <- summary_bd$p_links
+    G_est <- summary_bd$selected_g
+    K_est <- summary_bd$K_hat
+
+    # --- 3. PERFORMANCE METRICS ---
+
+    # -- 3.1. Graph Structure Recovery Metrics --
+    true_vec <- G_true[upper.tri(G_true)]
+    est_vec <- G_est[upper.tri(G_est)]
+    prob_vec <- pip_edge[upper.tri(pip_edge)]
+
+    TP <- sum(est_vec == 1 & true_vec == 1)
+    FP <- sum(est_vec == 1 & true_vec == 0)
+    TN <- sum(est_vec == 0 & true_vec == 0)
+    FN <- sum(est_vec == 0 & true_vec == 1)
+
+    sensitivity <- ifelse((TP + FN) == 0, 0, TP / (TP + FN))
+    specificity <- ifelse((TN + FP) == 0, 0, TN / (TN + FP))
+    precision   <- ifelse((TP + FP) == 0, 0, TP / (TP + FP))
+    f1_score    <- ifelse((precision + sensitivity) == 0, 0,
+                          2 * (precision * sensitivity) / (precision + sensitivity))
+
+    roc_obj <- roc(pred = sample_bd, actual = data, auc = TRUE)
+    auc_val <- as.numeric(roc_obj$auc)
+
+    # -- 3.2. Precision Matrix Estimation Metrics --
+    diff_K <- K_est - K_true
+    frobenius_norm <- norm(diff_K, type = "F")
+    spectral_norm  <- norm(diff_K, type = "2")
+    rmse <- sqrt(mean(diff_K^2))
+
+    # -- 3.3. Node Strength Difference Metric --
+    strength_true <- get_strength(G_true, K_true)
+    strength_est  <- get_strength(G_est, K_est)
+    strength_mae <- mean(abs(strength_est - strength_true))
+
+    # --- 4. STORE RESULTS ---
+    current_run_results <- data.frame(
+      condition_id = i, rep = rep, p = params$p,
+      n = params$n, graph_type = params$graph_type, g_prior = params$g_prior,
+      sensitivity = sensitivity, specificity = specificity,
+      precision = precision, f1_score = f1_score, auc = auc_val,
+      frobenius_norm = frobenius_norm, spectral_norm = spectral_norm,
+      rmse = rmse, strength_mae = strength_mae
+    )
+
+    results_df <- rbind(results_df, current_run_results)
 
   }
 }
 
-data_sim <-
+
 
 ################################################################################
 # RJ-WWA (van Den Boom et al., 2022)
@@ -139,3 +196,12 @@ A[2*leng, 1:leng] = A[1:leng, 2*leng] = -A[2*leng, (leng+1):(2*leng)]
 # Graph to igraph
 g = graph_from_adjacency_matrix(A, mode = "undirected", weighted = TRUE)
 round(E(g)$weight, 2)
+
+     # Generating multivariate normal data from a 'random' graph
+     data.sim <- bdgraph.sim( n = 50, p = 6, size = 7, vis = TRUE )
+
+     # Running sampling algorithm based on GGMs
+     sample.ggm <- bdgraph( data = data.sim, method = "ggm", iter = 10000 )
+
+     # Comparing the results
+     compare( list(sample.ggm), data.sim)
