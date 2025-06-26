@@ -25,20 +25,47 @@ get_strength <- function(graph_matrix, precision_matrix) {
 
 # --- 1. SIMULATION SETUP ---
 
-p <- 20
+p <- c(10, 25, 50, 100)
+probs <-c(0.5, 2/(p-1))
 
 conditions_grid <- expand.grid(
   p = p,
-  n = 2*p,
-  prob = 0.5,
-  g_prior = 0.5, # sparsity prior
-  eff_size = 0.3,
-  graph_type = "scale-free",
+  n_multiplier = c(1, 2, 5),
+  #prob =probs,
+  #g_prior = 0.5, # sparsity prior
+  eff_size = c(0.05, 0.2, 0.5),
+  graph_type = c("scale-free", "random", "cluster"),
   b_true = 3,
   b_prior = 3 # GWishart degrees of freedom prior
   )
 
-reps <- 1
+row_indices2 <- rep(seq_len(nrow(conditions_grid)), each = 2)
+expanded_grid2 <- conditions_grid[row_indices2, ]
+
+g_df <-  unlist(lapply(conditions_grid2$p, function(p_val) {
+  # The vector of two probability values to be created for each p
+  c(3, p_val)
+}))
+
+prob_vector <- unlist(lapply(conditions_grid$p, function(p_val) {
+  # The vector of two probability values to be created for each p
+  c( 0.5, 2 / (p_val - 1))
+}))
+
+expanded_grid2$g_prior <- g_df
+
+conditions_grid |>
+  #dplyr::group_by(p) |>
+  dplyr::mutate(prob = c(0.3, 0.5, 2/(p-1)), .by = dplyr::everything())
+
+
+conditions_grid$n <- conditions_grid$p * conditions_grid$n_multiplier
+conditions_grid$p <- c()
+
+reps <- 5 # Number of simulation repetitions
+mcmc_iter <- 5000
+burnin <- 2000
+num_chains <- 4 # Number of chains for convergence diagnostics
 
 results_df <- data.frame()
 
@@ -51,7 +78,7 @@ for (i in 1:nrow(conditions_grid)) {
 
   for (rep in 1:reps) {
 
-    cat(paste("Running repetition", i, "of", reps, "\n"))
+    cat(paste("\nCondition", i, "| Repetition", rep, "of", reps, "\n"))
 
     data  <-  bdgraph.sim(
       p = params$p,
@@ -66,16 +93,6 @@ for (i in 1:nrow(conditions_grid)) {
     G_true <- data$G
     K_true <- data$K
 
-    response <- G_true[upper.tri(G_true)]
-    strength_true <- get_deg(data)
-
-    #obtain amount of observations and variables
-    n = nrow(data$data)
-    p = ncol(data$data)
-    density = data$density
-    graph = data$graph
-    rep = data$rep
-    algorithm_name = "BDA"
 
     # --- 2.2. Run the BDMCMC Algorithm ---
     sample_bd <- bdgraph(
@@ -111,7 +128,7 @@ for (i in 1:nrow(conditions_grid)) {
     f1_score    <- ifelse((precision + sensitivity) == 0, 0,
                           2 * (precision * sensitivity) / (precision + sensitivity))
 
-    roc_obj <- roc(pred = sample_bd, actual = data, auc = TRUE)
+    roc_obj <- BDgraph::roc(pred = sample_bd, actual = data, auc = TRUE)
     auc_val <- as.numeric(roc_obj$auc)
 
     # -- 3.2. Precision Matrix Estimation Metrics --
@@ -136,6 +153,8 @@ for (i in 1:nrow(conditions_grid)) {
     )
 
     results_df <- rbind(results_df, current_run_results)
+
+    cat("\n")
 
   }
 }
