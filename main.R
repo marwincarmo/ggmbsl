@@ -26,41 +26,52 @@ get_strength <- function(graph_matrix, precision_matrix) {
 # --- 1. SIMULATION SETUP ---
 
 p <- c(10, 25, 50, 100)
-probs <-c(0.5, 2/(p-1))
+
+dgp_rho <- c(2 / (p[1] - 1), 0.5)     # Sparse vs. Dense
+dgp_b <- c(3, p[1])              # Diffuse vs. Strict
+
+# Define the "Prior" parameters for model fitting
+model_g <- c(2 / (p[1] - 1), 0.5)
+model_b <- c(3, p[1])
 
 conditions_grid <- expand.grid(
-  p = p,
-  n_multiplier = c(1, 2, 5),
-  #prob =probs,
-  #g_prior = 0.5, # sparsity prior
-  eff_size = c(0.05, 0.2, 0.5),
-  graph_type = c("scale-free", "random", "cluster"),
-  b_true = 3,
-  b_prior = 3 # GWishart degrees of freedom prior
+  p = rep(p, each=3),
+  n = NA,
+  true_g = NA,
+  prior_g = NA,
+  #true_rho = dgp_rho, # sparsity prior
+  #prior_g = model_g,
+  true_b = dgp_b,
+  prior_b = model_b,
+  graph_type = c("scale-free", "random", "cluster")
   )
 
-row_indices2 <- rep(seq_len(nrow(conditions_grid)), each = 2)
-expanded_grid2 <- conditions_grid[row_indices2, ]
+conditions_grid$n  <- conditions_grid$p * c(1,2,5)
 
-g_df <-  unlist(lapply(conditions_grid2$p, function(p_val) {
-  # The vector of two probability values to be created for each p
-  c(3, p_val)
-}))
+# Define the true edge probabilities
+row_indices3 <- rep(which(conditions_grid$graph_type == "random"), each = 3)
+expanded_grid3 <- conditions_grid[row_indices3, ]
 
 prob_vector <- unlist(lapply(conditions_grid$p, function(p_val) {
   # The vector of two probability values to be created for each p
-  c( 0.5, 2 / (p_val - 1))
-}))
+  c( 0.8, 0.5, 2 / (p_val - 1)) } ) )
 
-expanded_grid2$g_prior <- g_df
+conditions_grid <- rbind(conditions_grid[conditions_grid$graph_type != 'random',], expanded_grid3)
+conditions_grid$true_g <- ifelse(conditions_grid$graph_type == "random", prob_vector, NA)
 
-conditions_grid |>
-  #dplyr::group_by(p) |>
-  dplyr::mutate(prob = c(0.3, 0.5, 2/(p-1)), .by = dplyr::everything())
+# Define the misspecified prior edge probabilities
+row_indices2 <- rep(which(conditions_grid$graph_type == "random"), each = 3)
+expanded_grid2 <- conditions_grid[row_indices2, ]
 
+conditions_grid <- rbind(conditions_grid[conditions_grid$graph_type != 'random',], expanded_grid2)
+conditions_grid$prior_g <- ifelse(conditions_grid$graph_type == "random", prob_vector, NA)
 
-conditions_grid$n <- conditions_grid$p * conditions_grid$n_multiplier
-conditions_grid$p <- c()
+# Define the number of clusters
+conditions_grid$clusters <- ifelse(conditions_grid$graph_type == "cluster",
+                                   pmax(2, floor(conditions_grid$p/10)), NA)
+
+# Fixing the row names
+rownames(conditions_grid) <- seq(nrow(conditions_grid))
 
 reps <- 5 # Number of simulation repetitions
 mcmc_iter <- 5000
@@ -85,9 +96,9 @@ for (i in 1:nrow(conditions_grid)) {
       graph = params$graph_type,
       n = params$n,
       type = "Gaussian",
-      prob = params$prob,
-      mean = params$eff_size,
-      b = params$b_true
+      prob = 0.9,#params$true_g,
+      b = params$true_b,
+      class = params$clusters
     )
 
     G_true <- data$G
@@ -224,3 +235,33 @@ round(E(g)$weight, 2)
 
      # Comparing the results
      compare( list(sample.ggm), data.sim)
+
+
+data  <-  bdgraph.sim(
+      p = 15,
+      graph = "scale-free",
+      n = params$n,
+      type = "Gaussian",
+     prob = 0.01,
+      b = params$true_b,
+      #class = params$clusters
+    )
+plot(data)
+
+library(igraph)
+igraph::sample_smallworld(dim = 1, size = p, nei = round(size/p),     p = rewire)
+
+ba.1 = sample_pa(n = 15, power = 1, directed = FALSE)
+plot(ba.1, layout = co)
+co=igraph::layout_with_fr(ba.1)
+
+degree(ba.1)
+
+get_strength(data$G, data$K)
+get_strength()
+strength(ba.1)
+
+library(poweRlaw)
+
+g.pl = sample_pa(n = 20, power = 1, directed = FALSE)
+plot(g.pl)
