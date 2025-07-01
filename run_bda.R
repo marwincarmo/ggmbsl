@@ -92,7 +92,7 @@ for (i in 1:nrow(expanded_grid)) {
                                max_iter = 100)
 
       K_true <- rgwish(n = 1, adj = G_true, b = params$true_b, D = diag(params$p))
-      sigma <-  stats::cov2cor(solve(K_true))
+      sigma <-  solve(K_true)
 
       data <- BDgraph::rmvnorm(n = params$n, mean = 0, sigma = sigma)
 
