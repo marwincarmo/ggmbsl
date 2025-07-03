@@ -15,6 +15,12 @@ library(igraph)
 
 generate_graph <- function(p, target_density, graph_type, max_iter = 100) {
 
+  if (graph_type == "random") {
+
+    # The 'p' argument in sample_gnp is the edge probability, which is the density.
+    g <- igraph::sample_gnp(n = p, p = target_density, directed = FALSE)
+
+  } else {
   # The parameter we will tune to adjust density
   tuning_param <- 1
 
@@ -41,7 +47,7 @@ generate_graph <- function(p, target_density, graph_type, max_iter = 100) {
       g <- igraph::sample_smallworld(dim = 1, size = p, nei = tuning_param, p = 0.05)
 
     } else {
-      stop("Unsupported graph_type. Please use 'scale-free' or 'small-world'.")
+      stop("Unsupported graph_type. Please use 'random', 'scale-free' or 'small-world'.")
     }
 
     # Calculate the density of the generated graph
@@ -59,6 +65,7 @@ generate_graph <- function(p, target_density, graph_type, max_iter = 100) {
   # Return the final graph as a standard R matrix
   return(as.matrix(igraph::as_adjacency_matrix(g)))
   #return(g)
+  }
 }
 
 #' Custom function to compute node strenght
