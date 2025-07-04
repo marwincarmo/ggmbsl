@@ -45,7 +45,7 @@ for (i in 144:nrow(conditions_grid)) {
 
   for (rep in 1:reps) {
 
-    max_retries <- 50
+    max_retries <- 100
     retry_count <- 0
     fit_explore <- NULL
     run_succeeded <- FALSE # Flag to track success
@@ -58,7 +58,8 @@ for (i in 144:nrow(conditions_grid)) {
     repeat {
 
       true_data <- bggm_generate(
-        n_obs = params$n + 1, p_nodes = params$p,
+        n_obs = params$n + 1,
+        p_nodes = params$p,
         sd_pcor = params$true_sd_pcor,
         graph_type = params$graph_type,
         graph_prob = params$graph_prob
@@ -171,7 +172,7 @@ for (i in 144:nrow(conditions_grid)) {
   }
 }
 
-saveRDS(results_df, "out/df_bggm_143.rds")
+#saveRDS(results_df, "out/df_bggm_143.rds")
 # --- 5. FINAL RESULTS ---
 print("BGGM Simulation Complete!")
 print(head(results_df))
