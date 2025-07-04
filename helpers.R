@@ -1,5 +1,11 @@
-# Load igraph library
-library(igraph)
+# Load required libraries
+library(igraph)   # For generating graph structures
+library(BDgraph)  # For sampling from the G-Wishart distribution
+library(MCMCpack) # For sampling from the Inverse-Wishart distribution (riwish)
+library(MASS)     # For sampling from the multivariate normal distribution (mvrnorm)
+
+
+# generate_graph() ------------------------------------------------------------------
 
 #' Generate a graph with a specific target density using current igraph functions
 #'
@@ -9,7 +15,7 @@ library(igraph)
 #'
 #' @param p The number of nodes in the graph.
 #' @param target_density A numeric value between 0 and 1 for the desired graph density.
-#' @param graph_type A character string, either "scale-free" or "small-world".
+#' @param graph_type A character string, either "random", "scale-free" or "small-world".
 #' @param max_iter The maximum number of iterations to prevent infinite loops.
 #' @return An adjacency matrix (class 'matrix') of the generated graph.
 
@@ -61,12 +67,12 @@ generate_graph <- function(p, target_density, graph_type, max_iter = 100) {
     # If not, increment the tuning parameter for the next iteration
     tuning_param <- tuning_param + 1
   }
-
+  }
   # Return the final graph as a standard R matrix
   return(as.matrix(igraph::as_adjacency_matrix(g)))
-  #return(g)
-  }
 }
+
+# get_strenght() --------------------------------------------------------------------
 
 #' Custom function to compute node strenght
 #'
@@ -83,4 +89,76 @@ get_strength <- function(graph_matrix, precision_matrix) {
   # Calculate strength for each node
   node_strengths <- colSums(abs(weighted_adj_matrix))
   return(node_strengths)
+}
+
+# bggm_generate() -------------------------------------------------------------------
+
+#' Generate GGM data from a Matrix-F prior
+#'
+#' @param n_obs Integer. The number of observations to simulate.
+#' @param p_nodes Integer. The number of nodes (variables) in the graph.
+#' @param delta Numeric. The hyperparameter for the scaled beta distribution
+#'              of partial correlations. Smaller delta leads to more dispersed
+#'              partial correlations (away from zero). delta = 2 is uniform.
+#' @param graph_prob Numeric. The probability of an edge between any two nodes
+#'                   for a random graph.
+#' @param graph_type A character string, either "random", "scale-free" or  "small-world".
+#' @return A list containing the simulated data, the true precision and
+#'         covariance matrices, the adjacency matrix, and the true partial
+#'         correlation matrix.
+bggm_generate <- function(n_obs, p_nodes, sd_pcor, graph_type, graph_prob = 0.2) {
+
+  # --- Step 1: Generate a Graph Structure ---
+  adj_matrix <- generate_graph(p = p_nodes, target_density = graph_prob, graph_type = graph_type)
+
+  # --- Step 2: Set Matrix-F Hyperparameters ---
+  # As recommended in the paper (Sec 3.3.2) for the encompassing prior,
+  # we set epsilon to a small value.
+  epsilon <- 1e-05
+  nu <- 1 / epsilon         # First degrees of freedom for Matrix-F
+  B <- diag(p_nodes) * epsilon # Scale matrix for Matrix-F
+
+    # --- Step 2a: Derive delta from the partial correlation SD ---
+  # The variance of a scaled beta(-1, 1) distribution with shape parameters
+  # delta/2 is 1 / (delta + 1). The standard deviation is sqrt(1 / (delta + 1)).
+  # We can solve for delta: delta = (1 / sd_pcor^2) - 1.
+  if (sd_pcor <= 0 || sd_pcor >= 1) {
+    stop("sd_pcor must be between 0 and 1.")
+  }
+  delta <- (1 / sd_pcor^2) - 1
+
+  # --- Step 3: Sample Auxiliary Matrix Psi from Inverse-Wishart ---
+  # This is the first step in the hierarchical definition of the Matrix-F prior.
+  # Psi ~ IW(delta + p - 1, B)
+  df_iw <- delta + p_nodes - 1
+  Psi <- MCMCpack::riwish(v = df_iw, S = B)
+
+  # --- Step 4: Sample Precision Matrix Theta from G-Wishart ---
+  # Sample from the G-Wishart distribution, which is a Wishart distribution
+  # constrained to the graph structure.
+  # This ensures Theta is positive definite AND has the correct sparsity pattern.
+  # Theta ~ G-Wishart(nu, Psi)
+
+  Theta <- BDgraph::rgwish(n = 1, b = nu, D = Psi, adj = adj_matrix)
+
+  # --- Step 5: Compute Covariance and Partial Correlation Matrices ---
+  # The covariance matrix is the inverse of the precision matrix.
+  Sigma <- solve(Theta)
+
+  # The partial correlation matrix can be computed from the precision matrix.
+  Pcor <- -cov2cor(Theta)
+  diag(Pcor) <- 1
+
+  # --- Step 6: Generate Data from Multivariate Normal Distribution ---
+  # Y ~ MVN(mu = 0, Sigma = Sigma_true)
+  Y <- MASS::mvrnorm(n = n_obs, mu = rep(0, p_nodes), Sigma = Sigma)
+  colnames(Y) <- paste0("V", 1:p_nodes)
+
+  return(list(
+    data = as.data.frame(Y),
+    adj_matrix = adj_matrix,
+    true_precision = Theta,
+    true_covariance = Sigma,
+    true_pcor = Pcor
+  ))
 }

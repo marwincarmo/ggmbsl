@@ -41,7 +41,7 @@ generate_graph <- function(p, target_density, graph_type, max_iter = 100) {
       g <- igraph::sample_smallworld(dim = 1, size = p, nei = tuning_param, p = 0.05)
 
     } else {
-      stop("Unsupported graph_type. Please use 'scale-free' or 'small-world'.")
+      stop("Unsupported graph_type. Please use 'random', 'scale-free' or 'small-world'.")
     }
 
     # Calculate the density of the generated graph
