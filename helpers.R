@@ -80,14 +80,26 @@ generate_graph <- function(p, target_density, graph_type, max_iter = 100) {
 #' @param precision_matrix A symmetric positive definite matrix representing the inverse of the covariance matrix.
 #' @return A vector of node strenghts.
 #'
-get_strength <- function(graph_matrix, precision_matrix) {
-  # Convert precision matrix to partial correlation matrix
-  p_cors <- -cov2cor(precision_matrix)
+
+get_strength <- function(graph_matrix, matrix_input, input_type = "precision") {
+
+  # Check if the input type is valid
+  if (!input_type %in% c("precision", "pcor")) {
+    stop("input_type must be either 'precision' or 'pcor'")
+  }
+  # Convert to partial correlation matrix ONLY if the input is a precision matrix
+  if (input_type == "precision") {
+    p_cors <- -cov2cor(matrix_input)
+  } else {
+    # If input_type is "pcor", the matrix is already what we need
+    p_cors <- matrix_input
+  }
   diag(p_cors) <- 0
   # Apply the graph structure (set non-edges to zero)
   weighted_adj_matrix <- p_cors * graph_matrix
   # Calculate strength for each node
   node_strengths <- colSums(abs(weighted_adj_matrix))
+
   return(node_strengths)
 }
 
