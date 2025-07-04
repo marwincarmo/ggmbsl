@@ -36,31 +36,66 @@ conditions_grid <- tidyr::crossing(
   dplyr::mutate(n = p * n_multiplier) |>
   dplyr::select(-n_multiplier)
 
-reps <- 5
+reps <- 25
 results_df <- data.frame()
 
 # --- 2. MAIN SIMULATION LOOP ---
-for (i in 1:nrow(conditions_grid)) {
+for (i in 144:nrow(conditions_grid)) {
   params <- conditions_grid[i, ]
 
   for (rep in 1:reps) {
+
+    max_retries <- 50
+    retry_count <- 0
+    fit_explore <- NULL
+    run_succeeded <- FALSE # Flag to track success
+
     cat(paste("\n--- Condition:", i, "| Rep:", rep, "---\n"))
     print(params)
 
     # --- 2.1. Generate Data from a "Matrix-F World" ---
-    true_data <- bggm_generate(
-      n_obs = params$n + 1, p_nodes = params$p,
-      sd_pcor = params$true_sd_pcor,
-      graph_type = params$graph_type,
-      graph_prob = params$graph_prob
-    )
+
+    repeat {
+
+      true_data <- bggm_generate(
+        n_obs = params$n + 1, p_nodes = params$p,
+        sd_pcor = params$true_sd_pcor,
+        graph_type = params$graph_type,
+        graph_prob = params$graph_prob
+      )
+
+      fit_explore <- try(
+        BGGM::explore(true_data$data, prior_sd = params$prior_sd_pcor),
+        silent = TRUE
+      )
+
+      if (!inherits(fit_explore, "try-error")) {
+    # Success! Set the flag and break the repeat loop
+        run_succeeded <- TRUE
+        break
+      }
+
+      retry_count <- retry_count + 1
+      if (retry_count >= max_retries) {
+    # Failure after all retries. Print a warning and break the repeat loop.
+        warning(paste("Condition", i, "Rep", rep, "failed after", max_retries, "attempts. Skipping."))
+        break
+      }
+    }
+
+    # --- Check if the run succeeded before calculating metrics ---
+    # If the run failed, 'next' will skip the rest of the code in this
+    # iteration of the 'for (rep in 1:reps)' loop.
+    if (!run_succeeded) {
+      next
+    }
 
     G_true <- true_data$adj_matrix
     K_true <- true_data$true_precision
     P_true <- true_data$true_pcor
 
     # --- 2.2. Run the BGGM Algorithm ---
-    fit_explore <- BGGM::explore(true_data$data, prior_sd = params$prior_sd_pcor)
+    #fit_explore <- BGGM::explore(true_data$data, prior_sd = params$prior_sd_pcor)
     fit_select <- BGGM::select(fit_explore)
     # BF_10 is the Bayes Factor for H1 (edge exists) vs H0 (no edge)
     bf_matrix <- fit_select$BF_10
@@ -74,18 +109,8 @@ for (i in 1:nrow(conditions_grid)) {
 
     # Posterior mean of the partial correlations
     P_est <- fit_select$pcor_mat
-
-    # Convert estimated partial correlation matrix to precision matrix
-    # Add a small value to the diagonal of P_est to ensure stability for solve()
     diag(P_est) <- 1
-    # Check if R_est will be positive definite
-    if (!is.positive.definite(corpcor::pcor2cor(P_est)) ) {
-    # Fallback for the rare case the posterior mean pcor matrix isn't valid
-      K_est <- diag(params$p) # Assign a non-informative matrix
-    } else {
-      R_est <- corpcor::pcor2cor(P_est)
-      K_est <- solve(R_est)
-    }
+
 
     # --- 3. PERFORMANCE METRICS ---
     # (This section is identical to the BDA script, just with BGGM inputs)
@@ -96,8 +121,10 @@ for (i in 1:nrow(conditions_grid)) {
     TP <- sum(est_vec == 1 & true_vec == 1); FP <- sum(est_vec == 1 & true_vec == 0)
     TN <- sum(est_vec == 0 & true_vec == 0); FN <- sum(est_vec == 0 & true_vec == 1)
 
-    sensitivity <- TP / (TP + FN); specificity <- TN / (TN + FP)
-    precision   <- TP / (TP + FP); f1_score <- 2 * (precision * sensitivity) / (precision + sensitivity)
+    sensitivity <- TP / (TP + FN)
+    specificity <- TN / (TN + FP)
+    precision   <- TP / (TP + FP)
+    f1_score <- 2 * (precision * sensitivity) / (precision + sensitivity)
 
     # Handle cases where metrics are NaN
     sensitivity[is.nan(sensitivity)] <- 0; specificity[is.nan(specificity)] <- 0
@@ -116,8 +143,8 @@ for (i in 1:nrow(conditions_grid)) {
     ## frobenius_norm <- norm(diff_K, type = "F"); spectral_norm <- norm(diff_K, type = "2")
     ## rmse <- sqrt(mean(diff_K^2))
 
-    strength_true <- get_strength(G_true, K_true)
-    strength_est <- get_strength(G_est, K_est)
+    strength_true <- get_strength(G_true, P_true, "pcor")
+    strength_est <- get_strength(G_est, P_est, "pcor")
     strength_mae <- mean(abs(strength_est - strength_true))
     strength_true_mean_abs <- mean(abs(strength_true))
     relative_strength_mae <- ifelse(strength_true_mean_abs == 0, 0, strength_mae / strength_true_mean_abs)
@@ -135,7 +162,7 @@ for (i in 1:nrow(conditions_grid)) {
       p = params$p, n = params$n, graph_type = params$graph_type,
       true_sd_pcor = params$true_sd_pcor, prior_sd_pcor = params$prior_sd_pcor,
       # Metrics
-      sensitivity, specificity, precision, f1_score, auc,
+      sensitivity, specificity, precision, f1_score, auc_val,
       frobenius_norm, relative_frobenius,
       spectral_norm, rmse, relative_rmse, strength_mae,
       relative_strength_mae
@@ -144,6 +171,7 @@ for (i in 1:nrow(conditions_grid)) {
   }
 }
 
+saveRDS(results_df, "out/df_bggm_143.rds")
 # --- 5. FINAL RESULTS ---
 print("BGGM Simulation Complete!")
 print(head(results_df))
