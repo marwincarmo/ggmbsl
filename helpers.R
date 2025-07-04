@@ -140,18 +140,34 @@ bggm_generate <- function(n_obs, p_nodes, sd_pcor, graph_type, graph_prob = 0.2)
   delta <- (1 / sd_pcor^2) - 1
 
   # --- Step 3: Sample Auxiliary Matrix Psi from Inverse-Wishart ---
-  # This is the first step in the hierarchical definition of the Matrix-F prior.
-  # Psi ~ IW(delta + p - 1, B)
-  df_iw <- delta + p_nodes - 1
-  Psi <- MCMCpack::riwish(v = df_iw, S = B)
+
+  # Initialize Theta to NULL
+  Theta <- NULL
+
+  # Use a repeat loop for rejection sampling
+  for (i in 1:50) { # max tries = 50
+
+    # Sample Auxiliary Matrix Psi from Inverse-Wishart
+    # Psi ~ IW(delta + p - 1, B)
+    df_iw <- delta + p_nodes - 1
+    Psi <- MCMCpack::riwish(v = df_iw, S = B)
 
   # --- Step 4: Sample Precision Matrix Theta from G-Wishart ---
-  # Sample from the G-Wishart distribution, which is a Wishart distribution
-  # constrained to the graph structure.
-  # This ensures Theta is positive definite AND has the correct sparsity pattern.
-  # Theta ~ G-Wishart(nu, Psi)
+    # Attempt to sample Theta from G-Wishart
+    # Theta ~ G-Wishart(nu, Psi)
+    # The try() function will catch the error without stopping the script
+    Theta_candidate <- try(
+      BDgraph::rgwish(n = 1, b = nu, D = Psi, adj = adj_matrix),
+      silent = TRUE
+    )
 
-  Theta <- BDgraph::rgwish(n = 1, b = nu, D = Psi, adj = adj_matrix)
+    # Check if the attempt was successful
+    if (!inherits(Theta_candidate, "try-error")) {
+      # Success! Assign the result and break the loop
+      Theta <- Theta_candidate
+      break
+    }
+  }
 
   # --- Step 5: Compute Covariance and Partial Correlation Matrices ---
   # The covariance matrix is the inverse of the precision matrix.
