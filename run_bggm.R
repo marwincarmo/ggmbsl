@@ -172,7 +172,7 @@ for (i in 144:nrow(conditions_grid)) {
   }
 }
 
-#saveRDS(results_df, "out/df_bggm_143.rds")
-# --- 5. FINAL RESULTS ---
+saveRDS(results_df, paste0("out/df_bggm_", i, ".rds"))
+# --- 5. FINAL RESULTS ---1
 print("BGGM Simulation Complete!")
 print(head(results_df))
