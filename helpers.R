@@ -203,16 +203,6 @@ bggm_generate <- function(n_obs, p_nodes, sd_pcor, graph_type, graph_prob = 0.2)
 #
 # ===================================================================
 
-# --- 1. Load Required Libraries ---
-# Make sure you have these packages installed:
-# install.packages(c("MASS", "ggplot2", "reshape2"))
-
-library(MASS)
-library(ggplot2)
-library(reshape2)
-
-# --- 2. Define the Main Simulation Function (Refined) ---
-
 #' Generate GGM data from the SSSL prior for a concentration graph
 #'
 #' @param n_obs Integer. Number of observations to simulate.
@@ -224,38 +214,31 @@ library(reshape2)
 #' @param burnin Integer. Number of burn-in iterations for the generative sampler.
 #'
 #' @return A list containing the data, true graph, and true matrices.
-simulate_ggm_sssl <- function(n_obs, p_nodes, v0 = 0.02, h = 50, pi = 0.1, lambda = 1, burnin = 10) {
+simulate_ggm_sssl <- function(n_obs, p_nodes, v0 = 0.02, h = 50, pi = 0.1, lambda = 1, graph_type = "random", burnin = 10) {
 
   cat("1. Initializing...\n")
   # Set slab variance
   v1 <- v0 * h
 
+   #  Generate a Graph Structure
+  adj_matrix <- generate_graph(p = p_nodes, target_density = pi, graph_type = graph_type)
+
   # Initialize Omega as an identity matrix
   Omega_true <- diag(p_nodes)
-  # Initialize the adjacency matrix that will be defined by Z
-  adj_matrix <- matrix(0, p_nodes, p_nodes)
 
-  # --- Generative Gibbs Sampler Loop ---
+  # --- Step B: Generative Gibbs Sampler Loop ---
   cat(paste("2. Running generative sampler for", burnin, "iterations...\n"))
   for (iter in 1:burnin) {
-    # Iterate through each column to update
     for (j in 1:p_nodes) {
-      # --- a. Partition the matrix ---
       j_minus <- setdiff(1:p_nodes, j)
       Omega_11 <- Omega_true[j_minus, j_minus]
-
-      # --- b. Sample graph structure Z for this column ---
       p_minus_1 <- p_nodes - 1
-      z_col <- rbinom(p_minus_1, 1, pi)
+
+      # Determine spike/slab from the fixed adjacency matrix
+      z_col <- adj_matrix[j, j_minus]
       v_z <- ifelse(z_col == 1, v1, v0)
 
-      # Store the sampled Z in the adjacency matrix during the final iteration
-      if (iter == burnin) {
-        adj_matrix[j, j_minus] <- z_col
-        adj_matrix[j_minus, j] <- z_col
-      }
-
-      # --- c. Sample the column from its conditional prior ---
+      # Sample the column from its conditional prior
       Omega_11_inv <- solve(Omega_11)
       C_inv <- (lambda * Omega_11_inv) + diag(1 / v_z^2)
       C <- solve(C_inv)
@@ -263,7 +246,7 @@ simulate_ggm_sssl <- function(n_obs, p_nodes, v0 = 0.02, h = 50, pi = 0.1, lambd
       v_diag <- rgamma(1, shape = 1, rate = lambda / 2)
       omega_22_new <- v_diag + t(u_col) %*% Omega_11_inv %*% u_col
 
-      # --- d. Update Omega ---
+      # Update Omega
       Omega_true[j, j_minus] <- u_col
       Omega_true[j_minus, j] <- u_col
       Omega_true[j, j] <- omega_22_new
@@ -271,15 +254,12 @@ simulate_ggm_sssl <- function(n_obs, p_nodes, v0 = 0.02, h = 50, pi = 0.1, lambd
   }
 
   cat("3. Finalizing matrices and generating data...\n")
-  # The adjacency matrix is now directly determined by the final state of Z.
-  # No thresholding is needed.
-
   # Final covariance and partial correlation matrices
   Sigma_true <- solve(Omega_true)
   Pcor_true <- -cov2cor(Omega_true)
   diag(Pcor_true) <- 1
 
-  # --- Generate Data ---
+  # Generate Data
   Y_data <- MASS::mvrnorm(n = n_obs, mu = rep(0, p_nodes), Sigma = Sigma_true)
   colnames(Y_data) <- paste0("V", 1:p_nodes)
 
@@ -292,51 +272,3 @@ simulate_ggm_sssl <- function(n_obs, p_nodes, v0 = 0.02, h = 50, pi = 0.1, lambd
     true_pcor = Pcor_true
   ))
 }
-
-
-# --- 3. Run an Example Simulation ---
-
-# Set parameters for the simulation
-N_OBSERVATIONS <- 500
-P_NODES <- 20
-
-set.seed(456)
-simulation_result <- simulate_ggm_sssl(
-  n_obs = N_OBSERVATIONS,
-  p_nodes = P_NODES,
-  pi = 2 / (P_NODES - 1) # A sparse prior
-)
-
-# --- 4. Verify the Results ---
-
-cat("\n--- Ground Truth Verification ---\n")
-cat("The adjacency matrix is now derived directly from the latent Z variables.\n")
-print("True Adjacency Matrix (from Z):")
-print(simulation_result$adj_matrix)
-
-cat("\nTrue Precision Matrix (Omega):\n")
-cat("Note: Non-edge elements (where adj=0) are small but not exactly zero.\n")
-# Set very small values to zero for clean printing
-clean_precision <- simulation_result$true_precision
-clean_precision[abs(clean_precision) < 1e-8] <- 0
-print(round(clean_precision, 3))
-
-# Visualize the precision matrix as a heatmap
-melted_precision <- melt(simulation_result$true_precision)
-heatmap_plot <- ggplot(data = melted_precision, aes(x=Var1, y=Var2, fill=value)) +
-  geom_tile(color = "white") +
-  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
-                       midpoint = 0, limit = c(min(melted_precision$value), max(melted_precision$value)),
-                       space = "Lab", name="Precision") +
-  theme_minimal()+
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 8, hjust = 1),
-        axis.title.x = element_blank(),
-        axis.title.y = element_blank(),
-        panel.grid.major = element_blank(),
-        panel.border = element_blank(),
-        panel.background = element_blank(),
-        axis.ticks = element_blank()) +
-  coord_fixed() +
-  ggtitle("Heatmap of the True Precision Matrix (SSSL Prior)")
-
-print(heatmap_plot)
