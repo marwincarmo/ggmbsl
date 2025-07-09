@@ -122,6 +122,9 @@ for (i in 144:nrow(conditions_grid)) {
     TP <- sum(est_vec == 1 & true_vec == 1); FP <- sum(est_vec == 1 & true_vec == 0)
     TN <- sum(est_vec == 0 & true_vec == 0); FN <- sum(est_vec == 0 & true_vec == 1)
 
+    p_plus <- ifelse(sum(true_vec) == 0, 0, mean(prob_vec[true_vec == 1]))
+    p_minus <- ifelse(sum(true_vec == 0) == 0, 0, mean(prob_vec[true_vec == 0]))
+
     sensitivity <- TP / (TP + FN)
     specificity <- TN / (TN + FP)
     precision   <- TP / (TP + FP)
@@ -163,6 +166,7 @@ for (i in 144:nrow(conditions_grid)) {
       p = params$p, n = params$n, graph_type = params$graph_type,
       true_sd_pcor = params$true_sd_pcor, prior_sd_pcor = params$prior_sd_pcor,
       # Metrics
+      p_plus, p_minus,
       sensitivity, specificity, precision, f1_score, auc_val,
       frobenius_norm, relative_frobenius,
       spectral_norm, rmse, relative_rmse, strength_mae,
