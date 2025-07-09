@@ -8,7 +8,7 @@ library(tidyr)
 library(ssgraph)
 library(pROC)
 library(MASS)
-
+library(progressr)
 # It's good practice to also load any other packages your helper functions
 # (like simulate_ggm_sssl) depend on.
 # library(your_package_here)
@@ -19,7 +19,7 @@ source("helpers.R")
 # Define levels for each factor (same as your original code)
 p_levels        <- c(10, 25, 100)
 n_mult_levels   <- c(1, 5, 20)
-pi_levels       <- c(0.2, 0.5)
+pi_levels       <- c(0.2, 0.5, 0.8)
 v0_levels       <- c(0.02, 0.1)
 h_levels        <- c(10, 50)
 
@@ -29,8 +29,8 @@ conditions_grid <- tidyr::crossing(
   n_multiplier = n_mult_levels,
   graph_type = c("random", "small-world"),
   true_pi = pi_levels,
-  true_v0 = v0_levels,
-  true_h = h_levels,
+  true_v0 = 0.02,
+  true_h = 0.5,
   prior_pi = pi_levels,
   prior_v0 = v0_levels,
   prior_h = h_levels
@@ -40,13 +40,29 @@ conditions_grid <- tidyr::crossing(
 
 nrow(conditions_grid)
 
-reps <- 25 # Increase for full study
+reps <- 2 # Increase for full study
 
 # --- 2. DEFINE THE SIMULATION WORKER FUNCTION ---
 # This function encapsulates the logic for ONE condition (including all its repetitions).
 # It takes the parameters for a single row of `conditions_grid` as its input.
 
-run_simulation_condition <- function(params, reps) {
+run_and_save_condition <- function(i) {
+
+  # Define the output file path for this specific condition
+  output_file <- file.path("out/sssl/", paste0("df_sssl_", i, ".rds"))
+
+  # --- Check if result already exists ---
+  # If the file is already there, we skip this condition entirely.
+  if (file.exists(output_file)) {
+    # The progress bar still needs to be ticked, so we signal a progression
+    # without doing any work.
+    p <- progressor(steps = 1)
+    p()
+    return(NULL)
+  }
+
+  # Get the parameters for the current condition
+  params <- conditions_grid[i, ]
 
   # This list will store the data frames from each repetition
   repetition_results_list <- vector("list", reps)
@@ -62,15 +78,13 @@ run_simulation_condition <- function(params, reps) {
     K_true <- true_data$true_precision
 
     # --- 2.2. Run ssgraph ---
-    # IMPORTANT: When parallelizing across conditions, each worker should only use ONE core
-    # for the model fitting itself to avoid nested parallelism, which is inefficient.
     fit_sssl <- ssgraph(
       data = true_data$data,
       g.prior = params$prior_pi,
       var1 = params$prior_v0,
       var2 = params$prior_v0 * params$prior_h,
       iter = 5000,
-      cores = 1 # Set to 1 for the worker
+      cores = 1
     )
     summary_sssl <- summary.ssgraph(fit_sssl, vis = FALSE)
     pip_edge <- summary_sssl$p_links
@@ -92,7 +106,13 @@ run_simulation_condition <- function(params, reps) {
     precision   <- ifelse((TP + FP) == 0, 0, TP / (TP + FP))
     f1_score    <- ifelse((precision + sensitivity) == 0, 0, 2 * (precision * sensitivity) / (precision + sensitivity))
     roc_obj     <- pROC::roc(response = true_vec, predictor = prob_vec, quiet = TRUE)
-    auc_val     <- as.numeric(roc_obj$auc)
+
+    auc_val <- tryCatch({
+      roc_obj <- pROC::roc(response = true_vec, predictor = prob_vec, quiet = TRUE)
+      as.numeric(roc_obj$auc)
+    }, error = function(e) {
+      return(NA)
+    })
 
     diff_K <- K_est - K_true
     frobenius_norm <- norm(diff_K, type = "F")
@@ -115,24 +135,27 @@ run_simulation_condition <- function(params, reps) {
     relative_strength_mae <- ifelse(strength_true_mean_abs == 0, 0, strength_mae / strength_true_mean_abs)
 
     # --- 4. STORE RESULTS for this repetition ---
-    # We combine the parameters and results into a single tibble row
-    repetition_results_list[[rep]] <- dplyr::bind_cols(
-        params,
-        data.frame(
-            rep = rep,
-            p_plus = p_plus, p_minus = p_minus,
-            sensitivity = sensitivity, specificity = specificity,
-            precision = precision, f1_score = f1_score, auc = auc_val,
-            frobenius_norm = frobenius_norm, relative_frobenius = relative_frobenius,
-            spectral_norm = spectral_norm,
-            rmse = rmse, relative_rmse = relative_rmse,
-            strength_mae = strength_mae, relative_strength_mae = relative_strength_mae
-        )
+    repetition_results_list[[rep]] <- data.frame(
+        rep = rep, p_plus = p_plus, p_minus = p_minus, sensitivity = sensitivity,
+        specificity = specificity, precision = precision, f1_score = f1_score,
+        auc = auc_val, frobenius_norm = frobenius_norm, relative_frobenius = relative_frobenius,
+        spectral_norm = spectral_norm, rmse = rmse, relative_rmse = relative_rmse,
+        strength_mae = strength_mae, relative_strength_mae = relative_strength_mae
     )
   }
 
-  # Combine all repetition results for this one condition into a single data frame
-  return(dplyr::bind_rows(repetition_results_list))
+  # Combine all repetition results for this one condition
+  results_for_condition <- dplyr::bind_rows(repetition_results_list)
+
+  # Combine the parameters with the results
+  final_df_for_condition <- dplyr::bind_cols(params, results_for_condition)
+
+  # --- Save the result to a file ---
+  # This is the key step for saving progress.
+
+  saveRDS(final_df_for_condition, file = output_file)
+
+  return(NULL)
 }
 
 
@@ -143,29 +166,35 @@ run_simulation_condition <- function(params, reps) {
 # You can specify a number of workers: plan(multisession, workers = 10)
 plan(multisession)
 
-# `future_map_dfr` applies the function to each row of `conditions_grid` in parallel
-# and row-binds the resulting data frames into one final result (`_dfr`).
-# We use `purrr::pmap` to pass the columns of `conditions_grid` as named arguments to our function.
-# The `.options` argument is crucial for making your random number generation reproducible.
-
-# Split the conditions_grid into a list of rows to iterate over
-conditions_list <- purrr::transpose(conditions_grid)
-
-# Run the simulation in parallel
-# The `future_map_dfr` will show a progress bar automatically if the 'progressr' package is installed.
-results_df <- future_map_dfr(
-  conditions_list,
-  ~ run_simulation_condition(params = .x, reps = reps),
-  .options = furrr_options(seed = TRUE),
-  .progress = TRUE
-)
+with_progress({
+  # We use future_walk because we are calling the function for its side effect (saving a file),
+  # not for its return value.
+  future_walk(
+    1:nrow(conditions_grid),
+    ~ run_and_save_condition(.x),
+    .options = furrr_options(seed = TRUE)
+  )
+})
 
 
-# --- 6. VIEW RESULTS ---
+# --- 6. COMBINE ALL SAVED RESULTS ---
+cat("\n--- Simulation Complete ---\n")
+cat("Combining all saved result files...\n")
+
+# List all the .rds files in the results directory
+result_files <- list.files("results", pattern = "\\.rds$", full.names = TRUE)
+
+# Read each file and row-bind them into a single data frame
+results_df <- purrr::map_dfr(result_files, readRDS)
+
+
+# --- 7. VIEW FINAL RESULTS ---
 # The simulation is complete. Shut down the parallel workers.
 plan(sequential)
 
-cat("\n--- Simulation Complete ---\n")
 print(head(results_df))
-saveRDS(results_df, "out/df_sssl.rds")
 cat(paste("\nTotal rows in final results:", nrow(results_df), "\n"))
+cat(paste("Total conditions completed:", length(result_files), "out of", nrow(conditions_grid), "\n"))
+
+
+df = readRDS("out/sssl/df_sssl_622.rds")
