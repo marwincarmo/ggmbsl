@@ -38,8 +38,6 @@ conditions_grid <- tidyr::crossing(
   dplyr::mutate(n = p * n_multiplier) |>
   dplyr::select(-n_multiplier)
 
-nrow(conditions_grid)
-
 reps <- 25 # Increase for full study
 
 # --- 2. DEFINE THE SIMULATION WORKER FUNCTION ---
