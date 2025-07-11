@@ -40,7 +40,7 @@ reps <- 25
 results_df <- data.frame()
 
 # --- 2. MAIN SIMULATION LOOP ---
-for (i in 144:nrow(conditions_grid)) {
+for (i in 147:nrow(conditions_grid)) {
   params <- conditions_grid[i, ]
 
   for (rep in 1:reps) {
@@ -176,7 +176,9 @@ for (i in 144:nrow(conditions_grid)) {
   }
 }
 
+
 saveRDS(results_df, paste0("out/df_bggm_", i, ".rds"))
 # --- 5. FINAL RESULTS ---1
 print("BGGM Simulation Complete!")
+
 print(head(results_df))
