@@ -30,7 +30,7 @@ conditions_grid <- tidyr::crossing(
   graph_type = c("random", "small-world"),
   true_pi = pi_levels,
   true_v0 = 0.02,
-  true_h = 0.5,
+  true_h = 50,
   prior_pi = pi_levels,
   prior_v0 = v0_levels,
   prior_h = h_levels
@@ -182,7 +182,7 @@ cat("\n--- Simulation Complete ---\n")
 cat("Combining all saved result files...\n")
 
 # List all the .rds files in the results directory
-result_files <- list.files("results", pattern = "\\.rds$", full.names = TRUE)
+result_files <- list.files("out/sssl", pattern = "\\.rds$", full.names = TRUE)
 
 # Read each file and row-bind them into a single data frame
 results_df <- purrr::map_dfr(result_files, readRDS)
@@ -193,8 +193,8 @@ results_df <- purrr::map_dfr(result_files, readRDS)
 plan(sequential)
 
 print(head(results_df))
+
+saveRDS(results_df, "out/results_df_sssl.rds")
+
 cat(paste("\nTotal rows in final results:", nrow(results_df), "\n"))
 cat(paste("Total conditions completed:", length(result_files), "out of", nrow(conditions_grid), "\n"))
-
-
-df = readRDS("out/sssl/df_sssl_622.rds")
