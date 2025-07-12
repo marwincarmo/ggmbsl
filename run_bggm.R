@@ -40,7 +40,8 @@ reps <- 25
 results_df <- data.frame()
 
 # --- 2. MAIN SIMULATION LOOP ---
-for (i in 160:nrow(conditions_grid)) {
+for (i in 144:159#nrow(conditions_grid)
+     ) {
   params <- conditions_grid[i, ]
 
   for (rep in 1:reps) {

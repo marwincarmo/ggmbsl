@@ -7,9 +7,13 @@ library(ggplot2)
 
 bda_df <- readRDS("out/df_624.rds")
 
-bggm_df <- rbind(
-  readRDS("out/df_bggm_143.rds"),
-  readRDS("out/df_bggm_216.rds"))
+bggm_df <- readRDS("out/df_bggm_fix.rds")
+
+# bggm_df |> 
+#   dplyr::left_join(dplyr::select(conditions_grid, c(graph_prob, condition_id)), 
+#                    by = "condition_id") |> 
+#   dplyr::select(condition_id:graph_type, graph_prob, dplyr::everything()) |> 
+#   saveRDS("out/df_bggm_fix.rds")
 
 rj_df <- readRDS("out/df_rj_648")
 
@@ -24,6 +28,7 @@ get_summary <- function(df) {
   dplyr::summarise(value = mean(value)) |>
   tidyr::pivot_wider(names_from = name, values_from = value)
 }
+
 names(bda_df)
 names(bggm_df)
 
