@@ -2,38 +2,6 @@
 
 library(dplyr)
 library(ggplot2)
-library(RColorBrewer)
-library(latex2exp)
-library(purrr)
-
-my_theme <- function(){
-  theme_bw() + 
-    theme(
-      legend.position = "bottom"
-      , legend.title = element_text(face = "bold", size = rel(1.2))
-      , legend.text = element_text(face = "italic", size = rel(1.2))
-      , axis.text = element_text(face = "bold", size = rel(1.3), color = "black")
-      , axis.title = element_text(face = "bold", size = rel(1.3))
-      , plot.title = element_text(face = "bold", size = rel(1.6), hjust = .5)
-      , plot.subtitle = element_text(face = "italic", size = rel(1.2), hjust = .5)
-      , strip.text = element_text(face = "bold", size = rel(1.3), color = "black")
-      , strip.background = element_rect(fill = "white")
-    )
-}
-
-cbsafe_pal <- tribble(
-  ~name, ~rgb
-  , "black", c(0, 0, 0)
-  , "sky blue", c(86, 180, 233)
-  , "bluish green", c(0, 158, 115)
-  , "yellow", c(240, 228, 66)
-  , "orange", c(230, 159, 0)
-  , "blue", c(0, 114, 178)
-  , "vermillion", c(213, 94, 0)
-  , "reddish purple", c(204, 121, 167)
-) %>%
-  mutate(hex = map_chr(rgb, function(x) rgb(x[1], x[2], x[3], maxColorValue = 255)))
-
 
 ## 1.1 Load in results
 
@@ -98,82 +66,55 @@ g_df <- dplyr::bind_rows(list(BDA = bda_df, RJ = rj_df), .id = "model")
 
 ## F1-score/AUC/sensitivity/specificity
 g_df |>
+  dplyr::mutate(g_prior = factor(g_prior), g_true = factor(g_true),
+                n = factor(n)) |>
   dplyr::filter(b_prior == b_true,
                 #b_true == 3,
                 #relative_rmse < 6,
                 p == 25,) |>
-  dplyr::mutate(g_prior = factor(g_prior), g_true = factor(g_true),
-                n = factor(n),
-                g_true_labeled = factor(g_true, labels = 
-                                          c("True Graph: Sparse (0.2)", 
-                                            "True Graph: Medium (0.5)", 
-                                            "True Graph: Dense (0.8)")),
-                n_labeled = factor(n, labels = c("n = 25 (n = p)", 
-                                                 "n = 125 (n > p)", 
-                                                 "n = 500 (n >> p)"))) |>
-  ggplot(aes(x = g_prior, y = f1_score, color = model, fill = model)) +
-  #geom_jitter( alpha = .2) +
-  geom_boxplot(alpha = .5) + 
-  scale_color_manual(
-    values = c("cornflowerblue", "coral")
-    , labels = c("BDMCMC", "RJ-WWA")
-  ) + 
-  scale_fill_manual(
-    values = c("cornflowerblue", "coral")
-    , labels = c("BDMCMC", "RJ-WWA")
-  ) + 
-  facet_grid(n_labeled ~ g_true_labeled) +
-  my_theme() +
-  labs(y = "F1-score", x = "Edge prior", fill = "Method", color = "Method",
-       title = "BDMCMC and RJ-WWA are relatively robust to density misspecification",
-       subtitle = "Comparison of F1-Score in ideal prior conditions (p=25)")
-
-ggsave("img/pf1G.pdf", width = 11, height = 7)
-
+  ggplot(aes(x = g_prior, y = auc, color = model)) +
+  geom_boxplot() +
+  facet_grid(n ~ g_true)
 
 ## Relative RMSE
 g_df |>
-  dplyr::filter(g_prior == g_true,
-                p == 25) |>
   dplyr::mutate(g_prior = factor(g_prior), g_true = factor(g_true),
                 n = factor(n),
                 b_spec = case_when(
-                  b_prior == 3 & b_true == 10 ~ 0, #TeX("$\\delta_1$"),
-                  b_prior == 10 & b_true == 3 ~ 2, #"b_prior > b_true",
-                  b_prior == b_true ~ 1#"b_prior = b_true"
-                ),
-                b_spec = factor(b_spec,
-                                labels = c(`0` = TeX("$\\delta_{true} > \\delta_{prior}$")
-                                         , `1` = TeX("$\\delta_{true} = \\delta_{prior}$"),
-                                           `2` = TeX("$\\delta_{true} < \\delta_{prior}$"))),
-                # n_labeled = factor(n, labels = c(TeX("$n = 25~(n = p)$"),
-                #                                  TeX("$n = 125~(n > p)$"),
-                #                                  TeX("$n = 500~(n \\gg p)$"))
-                n_labeled = factor(n, labels = c(
-                  "n = 25 (n = p)",
-                  "n = 125  (n > p)",
-                  "n = 500  (n >> p)"  # <-- CORRECTED LINE
-                ))
+                  b_prior == 3 & b_true == 10 ~ "b_prior < b_true",
+                  b_prior == 10 & b_true == 3 ~ "b_prior > b_true",
+                  b_prior == b_true ~ "b_prior = b_true"
+                )
                 ) |>
-  ggplot(aes(x = g_true, y = relative_rmse, color = model, fill = model)) +
-  geom_boxplot(alpha = .5) + 
-  scale_color_manual(
-    values = c("cornflowerblue", "coral")
-    , labels = c("BDMCMC", "RJ-WWA")
-  ) + 
-  scale_fill_manual(
-    values = c("cornflowerblue", "coral")
-    , labels = c("BDMCMC", "RJ-WWA")
-  ) + 
-  facet_grid(n_labeled ~ b_spec, scales = "free_y", labeller = labeller(n_labeled = label_value, 
-                                                             b_spec = label_parsed)) +
-  labs(x = "Edge prior", y = "Relative RMSE",
-       title = "BDMCMC Advantage Extends to Precision Matrix Estimation",
-       subtitle = "Relative RMSE for a Medium-Density Graph (p=25)",
-       fill = "Method", color = "Method") +
-  my_theme()
+  dplyr::filter(g_prior == g_true,
+                #b_true == 3,
+                #relative_rmse < 6,
+                p == 25,) |>
+  ggplot(aes(x = g_true, y = relative_rmse, color = model)) +
+  geom_boxplot() +
+  facet_grid(n ~ b_spec, scales = "free_y")
 
-ggsave("img/p_gwish_K.pdf", width = 11, height = 7)
+
+s_rj |>
+  dplyr::filter(p ==100,# n ==25,
+                g_true == 0.2, g_prior == 0.8,
+                b_prior == 3, b_true == 3
+                ) |>
+  dplyr::select(specificity)
+
+## 1.2 Prior on K
+
+g_df |>
+  dplyr::mutate(g_prior = factor(g_prior), g_true = factor(g_true),
+                n = factor(n)) |>
+  dplyr::filter(g_prior == g_true,
+                p == 25,
+                ) |>
+  ggplot(aes(x = n, y = p_plus, color = model)) +
+  geom_boxplot() +
+  facet_grid(b_true ~ b_prior)
+
+s_rj[241, ]$sensitivity
 
 ## 2 Matrix-F: BGGM
 ## 
@@ -190,66 +131,19 @@ bggm_df |>
                 p = factor(p),
                 sd_spec = case_when(
                   true_sd_pcor == .2 & prior_sd_pcor == .2 ~ 
-                    1,
+                    "s_prior = 0.2, s_true = 0.2",
                   true_sd_pcor == .5 & prior_sd_pcor == .2 ~ 
-                    2,
+                    "s_prior = 0.2, s_true = 0.5",
                   true_sd_pcor == .5 & prior_sd_pcor == .5 ~ 
-                    3,
+                    "s_prior = 0.5, s_true = 0.5",
                   true_sd_pcor == .2 & prior_sd_pcor == .5 ~ 
-                    4
-                ),
-                g_true_labeled = factor(graph_prob, labels = 
-                                          c("True Graph: Sparse (0.2)", 
-                                            "True Graph: Medium (0.5)", 
-                                            "True Graph: Dense (0.8)")),
-                sd_spec = factor(sd_spec, levels = 1:4,
-                                 labels = c(TeX("$s_{pr} = s_{tr}$ = 0.2"),
-                                            TeX("$s_{pr} = 0.2,~s_{tr}$ = 0.5"),
-                                            TeX("$s_{pr} = s_{tr}$ = 0.5"),
-                                            TeX("$s_{pr} = 0.5,~s_{tr}$ = 0.2"))
-                )) |>
-  ggplot(aes(x = n, y = f1_score, color = p, fill = p)) +
-  geom_boxplot(alpha = 0.5) +
-  scale_color_manual(values = cbsafe_pal$hex[5:8])+
-  scale_fill_manual(values = cbsafe_pal$hex[5:8])+
-  scale_y_continuous(breaks = c(0, .25, .5, .75, 1)) +
-  facet_grid(sd_spec ~ g_true_labeled, labeller = labeller(g_true_labeled = label_value, 
-                                                           sd_spec = label_parsed)) +
-  labs(x = "Sample size", y = "F1-score",
-       title = "BGGM Performance is Robust to Graph Density",
-       subtitle = "F1-score remains stable as true sparsity changes (p=25)",
-       color = "Number of nodes", fill = "Number of nodes") +
-  my_theme()
-
-ggsave("img/p_bggm_f1.pdf", width = 11, height = 9)
-
-
-## BGGM relative RMSE
-
-bggm_df |>
-  # Focus on a single problem size and medium graph density
-  dplyr::filter(p == 25) |>
-  dplyr::mutate(
-    n = factor(n),
-    prior_labeled = factor(prior_sd_pcor, labels = c("Strong Shrinkage\n(Prior SD = 0.20)", "Weak Shrinkage\n(Prior SD = 0.50)")),
-    true_labeled = factor(true_sd_pcor, labels = c("True Effects: Weak", "True Effects: Strong"))
-  ) |>
-  ggplot(aes(x = prior_labeled, y = relative_rmse, fill = n, color =n)) + # Changed aes: use fill = n
-  geom_boxplot(position = position_dodge(preserve = "single"), alpha = 0.5)  + # Added position_dodge()
-  scale_color_manual(values = cbsafe_pal$hex[6:8])+
-  scale_fill_manual(values = cbsafe_pal$hex[6:8])+
-  facet_grid(graph_prob~true_labeled) +
-  labs(
-    title = "A More Conservative Prior Can Improve Performance",
-    subtitle = "Comparing weak vs. strong shrinkage priors (p=25)",
-    x = NULL,
-    y = "Relative RMSE", # Corrected this to match the data
-    fill = "Sample Size",
-    color = "Sample Size"
-  ) +
-  my_theme()
-
-ggsave("img/p_bggm_rmse.pdf", width = 11, height = 7)
+                    "s_prior = 0.5, s_true = 0.2"
+                )
+                ) |>
+  
+  ggplot(aes(x = n, y = f1_score, color = p)) +
+  geom_boxplot() +
+  facet_grid(sd_spec ~ graph_prob)
 
 ## 3 SSSL
 
@@ -431,32 +325,26 @@ sssl_df |>
                 prior_pi == true_pi,
                 prior_h == 50) |>
   dplyr::mutate(
-    
-    n_labeled = factor(n, labels = c("n = 25 (p = n)", "n = 125 (n > p)", "n = 500 (n >> p)")),
-    prior_v0_labeled = factor(prior_v0, labels = c("Spike: \n Correct (0.02)", "Spike: \n Misspecified (0.10)")),
+    prior_v0_labeled = factor(prior_v0, labels = c("Spike: Correct (0.02)", "Spike: Misspecified (0.10)")),
     true_pi_labeled = factor(true_pi, labels = c("True Graph: Sparse (0.2)", "True Graph: Medium (0.5)", "True Graph: Dense (0.8)"))
   ) |>
-  ggplot(aes(x = prior_v0_labeled, y = f1_score, group = prior_v0_labeled, 
-             color = prior_v0_labeled, fill = prior_v0_labeled)) +
-  geom_boxplot(alpha = .5) +
-  scale_color_manual(
-    values = c("cornflowerblue", "coral")
-  ) + 
-  scale_fill_manual(
-    values = c("cornflowerblue", "coral")
-  ) +
-  facet_grid(n_labeled~true_pi_labeled) +
+  dplyr::summarise(
+    mean_f1 = mean(f1_score),
+    .by = c(n, prior_v0_labeled, true_pi_labeled)
+  ) |>
+  ggplot(aes(x = n, y = mean_f1, group = prior_v0_labeled, color = prior_v0_labeled)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  facet_wrap(~true_pi_labeled) +
   labs(
-    title = "SSSL is Sensitive to Spike Prior Specification",
-    subtitle = "A misspecified spike variance (v0) leads to significant bias (p=25)",
-    x = NULL,
+    title = "SSSL Is Extremely Sensitive to Spike Prior Specification",
+    subtitle = "A misspecified spike variance (v0) leads to catastrophic failure (p=25)",
+    x = "Sample Size (n)",
     y = "Mean F1-Score",
+    color = "Spike Prior (v0)"
   ) +
-  my_theme() +
-  theme(legend.position = "none") +
+  theme_bw() +
   coord_cartesian(ylim = c(0, 1))
-
-ggsave("img/p_sssl_f1.pdf", width = 11.5, height = 7)
 
 # Plot 2: The "Sparsity Hunter" - Deconstructing Performance by Density
 
@@ -490,7 +378,7 @@ sssl_df |>
     color = "Sample Size (n)"
   ) +
   theme_bw() +
-  coord_cartesian(ylim = c(0, 1.0))
+  coord_cartesian(ylim = c(0, 1.01))
 
 ## The Specificity Collapse: In the specificity panel, the lines will start near 1.0 for sparse graphs and then crash towards 0 for dense graphs. SSSL loses its ability to avoid false positives in dense networks.
 
@@ -498,20 +386,3 @@ sssl_df |>
 
 ## The Full Story: By showing both plots, you can explain that the high F1-score for dense graphs is an artifact. The model is simply guessing "edge" for almost every connection, which gives it high sensitivity by default but makes it practically useless for discovering the true structure. This clearly defines its niche: it is a tool for sparse graphs only.
 ##
-
-sssl_df |> 
-  dplyr::filter(p == 25,
-                n == 125,
-                prior_h == 50) |>
-  dplyr::mutate(#true_pi = factor(true_pi),
-                prior_pi_labeled = factor(prior_pi, labels = c("Prior: Sparse (0.2)", "Prior: Average (0.5)", "Prior: Dense (0.8)")),
-                prior_v0_labeled = 
-                  factor(prior_v0,
-                         labels = c("Spike: \n Correct (0.02)", 
-                                    "Spike: \n Misspecified (0.10)")),
-                prior_v0_labeled = factor(prior_v0, labels = c("Spike: \n Correct (0.02)", "Spike: \n Misspecified (0.10)")),
-                true_pi_labeled = factor(true_pi, labels = c("True Graph: Sparse (0.2)", "True Graph: Medium (0.5)", "True Graph: Dense (0.8)"))
-                ) |> 
-  ggplot(aes(x = prior_v0_labeled, y = f1_score, color =prior_v0_labeled)) +
-  geom_boxplot(position = position_dodge(preserve = "single"), alpha = 0.5)  +
-  facet_grid(prior_pi_labeled~true_pi_labeled)
